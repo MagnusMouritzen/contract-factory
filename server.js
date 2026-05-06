@@ -22,7 +22,7 @@ const send = (res, status, body) => {
 const version = () =>
     process.env.GIT_SHA ||
     process.env.COMMIT_SHA ||
-    `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+    crypto.randomBytes(4).toString("hex").slice(0, 7)
 
 const body = req =>
     new Promise((resolve, reject) => {
@@ -47,7 +47,6 @@ async function publish(req, res) {
             pacticipantName: CONSUMER_NAME,
             pacticipantVersionNumber: consumerVersion,
             branch: process.env.BRANCH || "main",
-            tags: (process.env.TAGS || "").split(",").filter(Boolean),
             contracts: [{
                 consumerName: CONSUMER_NAME,
                 providerName,
