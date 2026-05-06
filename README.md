@@ -8,6 +8,62 @@ Small Node + browser app for creating a Pact contract with exactly three interac
 
 The browser builds the Pact JSON preview. The backend publishes it to the external Pact Broker.
 
+## Run
+Choose your case from the two options below.
+In any case, you will be able to access the broker at localhost:9292 and the contract factory at localhost:3000.
+
+### From the source code
+Download the repository.
+
+In the repository, run 'docker compose up'.
+
+Stop it with 'docker compose down'.
+
+### From published version
+Create a file called 'docker-compose.yml'. In it, write:
+```
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+    volumes:
+      - pg:/var/lib/postgresql/data
+
+  pact-broker:
+    image: pactfoundation/pact-broker:latest
+    ports:
+      - "9292:9292"
+    depends_on:
+      - postgres
+    environment:
+      PACT_BROKER_PORT: "9292"
+      PACT_BROKER_DATABASE_URL: "postgres://postgres:password@postgres/postgres"
+      PACT_BROKER_DATABASE_CONNECT_MAX_RETRIES: "5"
+
+  contract-factory:
+    image: magnusmouritzen/contract-factory:latest
+    ports:
+     - "3000:3000"
+    depends_on:
+     - pact-broker
+    environment:
+      BROKER_URL: http://pact-broker:9292
+      BRANCH: main
+      TAGS: main
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      PACT_DISABLE_SSL_VERIFICATION: "true"
+
+volumes:
+  pg:
+```
+
+Then in the directory where the file is, run 'docker compose up'.
+
+To stop it, run 'docker compose down'.
+
 ## Why this version uses the Pact CLI
 
 The upload route now mirrors the command that already worked for you:

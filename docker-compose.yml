@@ -1,26 +1,5 @@
 services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: postgres
-    volumes:
-      - pg:/var/lib/postgresql/data
-
-  pact-broker:
-    image: pactfoundation/pact-broker:latest
-    ports:
-      - "9292:9292"
-    depends_on:
-      - postgres
-    environment:
-      PACT_BROKER_PORT: "9292"
-      PACT_BROKER_DATABASE_URL: "postgres://postgres:password@postgres/postgres"
-      PACT_BROKER_DATABASE_CONNECT_MAX_RETRIES: "5"
-
-  contract-factory:
-    image: magnusmouritzen/contract-factory:latest
+  app:
     build: .
     ports:
      - "3000:3000"
@@ -32,6 +11,3 @@ services:
       TAGS: main
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
       PACT_DISABLE_SSL_VERIFICATION: "true"
-
-volumes:
-  pg:
