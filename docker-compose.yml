@@ -4,12 +4,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      BROKER_URL: ${BROKER_URL:-https://api.guildmaster.otterknight.net/}
-      BRANCH: ${BRANCH:-main}
-      TAGS: ${TAGS:-main}
-      BUILD_URL: ${BUILD_URL:-}
-      PACT_BROKER_USERNAME: ${PACT_BROKER_USERNAME:-}
-      PACT_BROKER_PASSWORD: ${PACT_BROKER_PASSWORD:-}
-      PACT_BROKER_TOKEN: ${PACT_BROKER_TOKEN:-}
-      GIT_SHA: ${GIT_SHA:-}
-      COMMIT_SHA: ${COMMIT_SHA:-}
+      BROKER_URL: https://api.guildmaster.otterknight.net/
+      BRANCH: main
+      TAGS: main
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      PACT_DISABLE_SSL_VERIFICATION: "true"

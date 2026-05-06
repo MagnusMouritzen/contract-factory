@@ -8,6 +8,19 @@ Small Node + browser app for creating a Pact contract with exactly three interac
 
 The browser builds the Pact JSON preview. The backend publishes it to the external Pact Broker.
 
+## Why this version uses the Pact CLI
+
+The upload route now mirrors the command that already worked for you:
+
+```bash
+npx pact broker publish pacts \
+  --consumer-app-version $VERSION \
+  --broker-base-url https://api.guildmaster.otterknight.net/ \
+  --branch $BRANCH
+```
+
+The backend writes the generated Pact JSON to a temporary `pacts` folder and runs the local Pact CLI from `node_modules/.bin/pact`. The Docker image uses Debian slim instead of Alpine because the Pact CLI package ships platform binaries, and Debian avoids musl/glibc binary issues.
+
 ## Files
 
 ```txt
@@ -25,7 +38,7 @@ pact-contract-website/
 
 ## Broker
 
-The app no longer starts a local Pact Broker or Postgres database.
+The app does not start a local Pact Broker or Postgres database.
 
 By default, Docker Compose points the app at:
 
@@ -56,7 +69,8 @@ http://localhost:3000
 You need Node 20 or newer.
 
 ```bash
-BROKER_URL=https://api.guildmaster.otterknight.net/ node server.js
+npm install
+BROKER_URL=https://api.guildmaster.otterknight.net/ npm start
 ```
 
 Then open:
@@ -72,13 +86,13 @@ Copy `.env.example` to `.env` if you want to override values locally.
 ```txt
 BROKER_URL=https://api.guildmaster.otterknight.net/
 BRANCH=main
-TAGS=main
+TAGS=
 BUILD_URL=https://ci/builds/1234
-PACT_BROKER_USERNAME=...
-PACT_BROKER_PASSWORD=...
-PACT_BROKER_TOKEN=...
-GIT_SHA=...
-COMMIT_SHA=...
+PACT_BROKER_USERNAME=
+PACT_BROKER_PASSWORD=
+PACT_BROKER_TOKEN=
+GIT_SHA=
+COMMIT_SHA=
 ```
 
 Consumer name is hard coded in `server.js`:
@@ -99,28 +113,13 @@ When you click upload, the browser calls the app backend:
 POST /api/publish
 ```
 
-The backend then publishes to the Pact Broker. It first tries to read the broker index and use the `pb:publish-contracts` link. If that relation is not available to the client, it falls back to:
+The backend writes one generated Pact file to `/tmp`, then runs:
 
-```txt
-POST ${BROKER_URL}/contracts/publish
+```bash
+pact broker publish /tmp/generated-pacts \
+  --consumer-app-version <generated-version> \
+  --broker-base-url <BROKER_URL> \
+  --branch <BRANCH>
 ```
 
-The backend sends this shape:
-
-```json
-{
-  "pacticipantName": "Frontend App",
-  "pacticipantVersionNumber": "generated-version",
-  "branch": "main",
-  "tags": ["main"],
-  "contracts": [
-    {
-      "consumerName": "Frontend App",
-      "providerName": "Provider API",
-      "specification": "pact",
-      "contentType": "application/json",
-      "content": "base64 encoded pact json"
-    }
-  ]
-}
-```
+If publishing fails, the UI now shows the Pact CLI stdout and stderr instead of hiding the real error behind a generic 502.

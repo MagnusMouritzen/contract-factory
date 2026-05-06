@@ -1,192 +1,220 @@
 import { createServer } from "node:http";
+import crypto from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import crypto from "node:crypto";
 
+const APP_DIR = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
-const BROKER_URL = process.env.BROKER_URL || process.env.PACT_BROKER_BASE_URL || "https://api.guildmaster.otterknight.net";
+const BROKER_URL =
+    process.env.BROKER_URL ||
+    process.env.PACT_BROKER_BASE_URL ||
+    "https://api.guildmaster.otterknight.net/";
+
 const CONSUMER_NAME = "Frontend App";
-const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
+const PUBLIC_DIR = join(APP_DIR, "public");
 
 const types = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8"
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8"
 };
 
-function consumerVersion() {
-  const sha = process.env.GIT_SHA || process.env.COMMIT_SHA;
-  if (sha) return sha;
-  return `${new Date().toISOString().replace(/[-:.TZ]/g, "")}-${crypto.randomBytes(4).toString("hex")}`;
+function makeConsumerVersion() {
+    return (
+        process.env.GIT_SHA ||
+        process.env.COMMIT_SHA ||
+        `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`
+    );
 }
 
 function json(res, status, body) {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(body));
+    res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(body, null, 2));
 }
 
 function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", chunk => {
-      body += chunk;
-      if (body.length > 2_000_000) reject(new Error("Request body too large"));
-    });
-    req.on("end", () => resolve(body));
-    req.on("error", reject);
-  });
-}
+    return new Promise((resolve, reject) => {
+        let body = "";
 
-function authHeaders(headers) {
-  if (process.env.PACT_BROKER_TOKEN) {
-    headers.authorization = `Bearer ${process.env.PACT_BROKER_TOKEN}`;
-  } else if (process.env.PACT_BROKER_USERNAME && process.env.PACT_BROKER_PASSWORD) {
-    const value = Buffer.from(`${process.env.PACT_BROKER_USERNAME}:${process.env.PACT_BROKER_PASSWORD}`).toString("base64");
-    headers.authorization = `Basic ${value}`;
-  }
-  return headers;
+        req.on("data", chunk => {
+            body += chunk;
+            if (body.length > 2_000_000) {
+                reject(new Error("Request body too large"));
+            }
+        });
+
+        req.on("end", () => resolve(body));
+        req.on("error", reject);
+    });
 }
 
 function cleanBaseUrl(url) {
-  return url.replace(/\/+$/, "");
+    return url.replace(/\/+$/, "");
 }
 
-function resolveBrokerUrl(href) {
-  return new URL(href, `${cleanBaseUrl(BROKER_URL)}/`).toString();
-}
+async function publishDirect(pact, providerName, version) {
+    const body = {
+        pacticipantName: pact.consumer.name,
+        pacticipantVersionNumber: version,
+        branch: process.env.BRANCH || "main",
+        tags: (process.env.TAGS || "")
+            .split(",")
+            .map(x => x.trim())
+            .filter(Boolean),
+        buildUrl: process.env.BUILD_URL || undefined,
+        contracts: [
+            {
+                consumerName: pact.consumer.name,
+                providerName,
+                specification: "pact",
+                contentType: "application/json",
+                content: Buffer.from(JSON.stringify(pact)).toString("base64")
+            }
+        ]
+    };
 
-async function getPublishUrl() {
-  const base = cleanBaseUrl(BROKER_URL);
-
-  try {
-    const indexRes = await fetch(`${base}/`, {
-      method: "GET",
-      headers: authHeaders({ accept: "application/hal+json, application/json" })
+    const response = await fetch(`${cleanBaseUrl(BROKER_URL)}/contracts/publish`, {
+        method: "POST",
+        headers: {
+            "content-type": "application/json"
+        },
+        body: JSON.stringify(body)
     });
 
-    const text = await indexRes.text();
-    const data = JSON.parse(text);
-    const href = data?._links?.["pb:publish-contracts"]?.href;
+    const text = await response.text();
 
-    if (href) return resolveBrokerUrl(href);
-  } catch {
-    // If the index is served as HTML or the relation is not exposed, try the documented path directly.
-  }
+    let data;
+    try {
+        data = JSON.parse(text);
+    } catch {
+        data = text;
+    }
 
-  return `${base}/contracts/publish`;
+    if (!response.ok) {
+        throw Object.assign(new Error(`Broker returned ${response.status}`), {
+            status: response.status,
+            response: data
+        });
+    }
+
+    return data;
 }
 
 async function publish(req, res) {
-  if (!BROKER_URL) {
-    return json(res, 500, { ok: false, error: "BROKER_URL is not set" });
-  }
+    let input;
 
-  let input;
-  try {
-    input = JSON.parse((await readBody(req)) || "{}");
-  } catch {
-    return json(res, 400, { ok: false, error: "Request body must be valid JSON" });
-  }
-
-  const { pact, providerName, consumerVersion } = input;
-  const errors = [];
-
-  if (!providerName || typeof providerName !== "string") errors.push("providerName is required");
-  if (!consumerVersion || typeof consumerVersion !== "string") errors.push("consumerVersion is required");
-  if (!pact || typeof pact !== "object") errors.push("pact is required");
-  if (pact?.consumer?.name !== CONSUMER_NAME) errors.push(`pact.consumer.name must be ${CONSUMER_NAME}`);
-  if (pact?.provider?.name !== providerName) errors.push("pact.provider.name must match providerName");
-  if (!Array.isArray(pact?.interactions) || pact.interactions.length !== 3) errors.push("pact must contain exactly 3 interactions");
-
-  if (errors.length) return json(res, 400, { ok: false, errors });
-
-  const branch = process.env.BRANCH || "main";
-  const tags = (process.env.TAGS || branch).split(",").map(x => x.trim()).filter(Boolean);
-  const content = Buffer.from(JSON.stringify(pact), "utf8").toString("base64");
-  const payload = {
-    pacticipantName: CONSUMER_NAME,
-    pacticipantVersionNumber: consumerVersion,
-    branch,
-    tags,
-    buildUrl: process.env.BUILD_URL || undefined,
-    contracts: [
-      {
-        consumerName: CONSUMER_NAME,
-        providerName,
-        specification: "pact",
-        contentType: "application/json",
-        content
-      }
-    ]
-  };
-
-  Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
-
-  try {
-    const publishUrl = await getPublishUrl();
-    const brokerRes = await fetch(publishUrl, {
-      method: "POST",
-      headers: authHeaders({ accept: "application/json", "content-type": "application/json" }),
-      body: JSON.stringify(payload)
-    });
-
-    const text = await brokerRes.text();
-    let data;
     try {
-      data = JSON.parse(text);
+        input = JSON.parse((await readBody(req)) || "{}");
     } catch {
-      data = text;
+        return json(res, 400, {
+            ok: false,
+            error: "Request body must be valid JSON"
+        });
     }
 
-    return json(res, brokerRes.ok ? 200 : brokerRes.status, {
-      ok: brokerRes.ok,
-      status: brokerRes.status,
-      publishedVersion: consumerVersion,
-      brokerPublishUrl: publishUrl,
-      brokerResponse: data
-    });
-  } catch (error) {
-    return json(res, 502, { ok: false, error: `Could not reach Pact Broker: ${error.message}` });
-  }
+    const { pact, providerName } = input;
+    const errors = [];
+
+    if (!providerName || typeof providerName !== "string") {
+        errors.push("providerName is required");
+    }
+
+    if (!pact || typeof pact !== "object") {
+        errors.push("pact is required");
+    }
+
+    if (pact?.consumer?.name !== CONSUMER_NAME) {
+        errors.push(`pact.consumer.name must be ${CONSUMER_NAME}`);
+    }
+
+    if (pact?.provider?.name !== providerName) {
+        errors.push("pact.provider.name must match providerName");
+    }
+
+    if (!Array.isArray(pact?.interactions) || pact.interactions.length !== 3) {
+        errors.push("pact must contain exactly 3 interactions");
+    }
+
+    if (errors.length) {
+        return json(res, 400, {
+            ok: false,
+            errors
+        });
+    }
+
+    const version = makeConsumerVersion();
+
+    try {
+        const result = await publishDirect(pact, providerName, version);
+
+        return json(res, 200, {
+            ok: true,
+            publishedVersion: version,
+            brokerUrl: cleanBaseUrl(BROKER_URL),
+            result
+        });
+    } catch (error) {
+        console.error("Publish failed:", error);
+
+        return json(res, 500, {
+            ok: false,
+            error: error.message,
+            status: error.status,
+            response: error.response,
+            brokerUrl: cleanBaseUrl(BROKER_URL)
+        });
+    }
 }
 
 async function serveStatic(pathname, res) {
-  const requested = pathname === "/" ? "/index.html" : pathname;
-  const filePath = normalize(join(PUBLIC_DIR, requested));
+    const requested = pathname === "/" ? "/index.html" : pathname;
+    const filePath = normalize(join(PUBLIC_DIR, requested));
 
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403);
-    return res.end("Forbidden");
-  }
+    if (!filePath.startsWith(PUBLIC_DIR)) {
+        res.writeHead(403);
+        return res.end("Forbidden");
+    }
 
-  try {
-    const data = await readFile(filePath);
-    res.writeHead(200, { "content-type": types[extname(filePath)] || "application/octet-stream" });
-    res.end(data);
-  } catch {
-    res.writeHead(404);
-    res.end("Not found");
-  }
+    try {
+        const data = await readFile(filePath);
+
+        res.writeHead(200, {
+            "content-type": types[extname(filePath)] || "application/octet-stream"
+        });
+
+        res.end(data);
+    } catch {
+        res.writeHead(404);
+        res.end("Not found");
+    }
 }
 
 createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+    const url = new URL(req.url, `http://${req.headers.host}`);
 
-  if (req.method === "GET" && url.pathname === "/api/config") {
-    return json(res, 200, {
-      consumerName: CONSUMER_NAME,
-      consumerVersion: consumerVersion(),
-      brokerUrl: BROKER_URL,
-      branch: process.env.BRANCH || "main"
+    if (req.method === "GET" && url.pathname === "/api/config") {
+        return json(res, 200, {
+            consumerName: CONSUMER_NAME,
+            consumerVersion: makeConsumerVersion(),
+            brokerUrl: BROKER_URL,
+            branch: process.env.BRANCH || "main"
+        });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/publish") {
+        return publish(req, res);
+    }
+
+    if (req.method === "GET") {
+        return serveStatic(url.pathname, res);
+    }
+
+    return json(res, 404, {
+        ok: false,
+        error: "Not found"
     });
-  }
-
-  if (req.method === "POST" && url.pathname === "/api/publish") return publish(req, res);
-  if (req.method === "GET") return serveStatic(url.pathname, res);
-
-  json(res, 404, { ok: false, error: "Not found" });
 }).listen(PORT, () => {
-  console.log(`Contract builder running on http://localhost:${PORT}`);
+    console.log(`Contract builder running on http://localhost:${PORT}`);
 });
