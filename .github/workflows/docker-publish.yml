@@ -24,5 +24,5 @@ jobs:
 
       - name: Push image
         run: |
-            docker push ${{ vars.DOCKERHUB_REPOSITORY }}:latest \
+            docker push ${{ vars.DOCKERHUB_REPOSITORY }}:latest 
             docker push ${{ vars.DOCKERHUB_REPOSITORY }}:${{ github.sha }} 
