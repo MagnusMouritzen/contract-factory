@@ -3,8 +3,14 @@
   "version": "1.0.0",
   "type": "module",
   "private": true,
+  "config": {
+    "pact_do_not_track": true
+  },
   "scripts": {
     "start": "node server.js"
+  },
+  "dependencies": {
+    "@pact-foundation/pact-cli": "18.0.0"
   },
   "engines": {
     "node": ">=20"
