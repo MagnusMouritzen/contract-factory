@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pact Contract Builder</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Pact Contract Builder</h1>
+      <p>Build three consumer-driven contract interactions and publish them to the Pact Broker.</p>
+    </div>
+  </header>
+
+  <main>
+    <section class="metadata card">
+      <label>
+        Consumer name
+        <input id="consumerName" readonly>
+      </label>
+      <label>
+        Consumer version
+        <input id="consumerVersion" readonly>
+      </label>
+      <label>
+        Broker URL
+        <input id="brokerUrl" readonly>
+      </label>
+      <label>
+        Provider name
+        <input id="providerName" placeholder="User API">
+      </label>
+    </section>
+
+    <section class="split">
+      <form id="contractForm" class="card">
+        <div id="requests"></div>
+        <button id="uploadBtn" type="button">Upload contract to Pact Broker</button>
+        <pre id="uploadResult" class="result"></pre>
+      </form>
+
+      <aside class="card previewPane">
+        <div class="previewHeader">
+          <h2>Contract JSON</h2>
+          <span id="validationState"></span>
+        </div>
+        <pre id="preview"></pre>
+      </aside>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
