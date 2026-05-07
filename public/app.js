@@ -7,7 +7,6 @@ const requests = [
     given: "a resource exists",
     endpoint: "/resources/1",
     headers: '{\n  "Accept": ["application/json"]\n}',
-    requestBody: "",
     code: 200,
     response: '{\n  "id": 1,\n  "name": "Example"\n}'
   },
@@ -19,7 +18,6 @@ const requests = [
     given: "no resource exists",
     endpoint: "/resources/999",
     headers: '{\n  "Accept": ["application/json"]\n}',
-    requestBody: "",
     code: 404,
     response: '{\n  "error": "Not found"\n}'
   },
@@ -72,10 +70,12 @@ function requestHtml(request) {
         <textarea id="${request.key}-headers">${request.headers}</textarea>
       </label>
 
+      ${request.method === "POST" ? `
       <label class="fieldGap">
         Request body
         <textarea id="${request.key}-requestBody">${request.requestBody || ""}</textarea>
       </label>
+    ` : ""}
 
       <label class="fieldGap">
         Response
@@ -118,12 +118,14 @@ function buildPact() {
             errors
         );
 
-        const requestBody = parseJson(
+        const requestBody = request.method === "POST"
+        ? parseJson(
             el(`${request.key}-requestBody`).value,
             null,
             `${request.title} request body`,
             errors
-        );
+        )
+        : null;
 
         const responseBody = parseJson(
             el(`${request.key}-response`).value,
